@@ -11,17 +11,17 @@ matplotlib.use('TkAgg')
 mp_pose = mp.solutions.pose
 
 with mp_pose.Pose(static_image_mode=True, min_detection_confidence=0.5, model_complexity=2) as pose:
-    img_path = "C:\\Users\\matte\\PycharmProjects\\TII-Safety\\dataset\\michele tornio " \
-               "safe\\2024-07-17_051628\\data\\122201.68297975_5.jpeg "
+    img_path = "C:\\Users\\matte\\PycharmProjects\\TII-Safety\\dataset\\francesco gloves\\guanto non tolto" \
+               "\\2024-07-19_052911\\data\\158539.634349291_5.jpeg "
 
     img = cv2.imread(img_path)
     img = resize(img, 640, 480)
     cv2.imshow('img', img)
     cv2.waitKey()
 
-    img = cv2.blur(img, (10, 10))
-    cv2.imshow('img', img)
-    cv2.waitKey()
+    # img = cv2.blur(img, (13, 13))
+    # cv2.imshow('img', img)
+    # cv2.waitKey()
 
     results = pose.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
 

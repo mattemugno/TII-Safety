@@ -9,7 +9,7 @@ from os.path import abspath, dirname
 
 import mediapipe as mp
 
-dataset_path = os.path.join('../dataset', 'gloves_task')
+dataset_path = os.path.join(os.path.dirname(os.getcwd()), 'dataset')
 
 subjects = ["francesco", "matteo", "michele", "michela"]
 
