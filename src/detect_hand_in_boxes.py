@@ -1,13 +1,9 @@
 import os
 import shutil
 
-from utils import detect_hand_in_image
-
-import json
-import os
-from os.path import abspath, dirname
-
 import mediapipe as mp
+
+from utils import detect_hand_in_image
 
 dataset_path = os.path.join(os.path.dirname(os.getcwd()), 'dataset')
 
@@ -18,9 +14,7 @@ hands = mp_hands.Hands(static_image_mode=True, max_num_hands=2, min_detection_co
 
 for subject in subjects:
 
-    subject_gloves_path = os.path.join(dataset_path, 'gloves_' + f'{subject}')
-
-    print(subject_gloves_path)
+    subject_gloves_path = os.path.join(dataset_path, 'gloves_task', 'gloves_' + f'{subject}')
 
     positive_folder = os.path.join(subject_gloves_path, "positive")
     negative_folder = os.path.join(subject_gloves_path, "negative")

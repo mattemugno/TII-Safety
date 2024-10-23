@@ -1,7 +1,7 @@
 import json
 import math
 import os
-import mediapipe as mp
+
 import cv2
 import numpy as np
 
@@ -102,9 +102,9 @@ def get_keypoints(image_files, mp_pose, keypoints, folder):
             depth_map = read_depth_map_from_json(im_name.replace('.jpeg', '.json'))
             depth_img = np.stack((depth_map,) * 3, axis=-1)
 
-            keypoints[folder][name] = {}
+            keypoints[folder][name]['keypoints'] = {}
 
-            keypoints[folder][name]['lh'] = round_tuple(
+            keypoints[folder][name]['keypoints']['lh'] = round_tuple(
                 (results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].x,
                  results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].y,
                  depth_img[int(results.pose_landmarks.landmark[
@@ -114,7 +114,7 @@ def get_keypoints(image_files, mp_pose, keypoints, folder):
                  results.pose_landmarks.landmark[
                      mp_pose.PoseLandmark.LEFT_WRIST].visibility))
 
-            keypoints[folder][name]['rh'] = round_tuple(
+            keypoints[folder][name]['keypoints']['rh'] = round_tuple(
                 (results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].x,
                  results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].y,
                  depth_img[int(results.pose_landmarks.landmark[
@@ -124,7 +124,7 @@ def get_keypoints(image_files, mp_pose, keypoints, folder):
                  results.pose_landmarks.landmark[
                      mp_pose.PoseLandmark.RIGHT_WRIST].visibility))
 
-            keypoints[folder][name]['le'] = round_tuple(
+            keypoints[folder][name]['keypoints']['le'] = round_tuple(
                 (results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].x,
                  results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].y,
                  depth_img[int(results.pose_landmarks.landmark[
@@ -134,7 +134,7 @@ def get_keypoints(image_files, mp_pose, keypoints, folder):
                  results.pose_landmarks.landmark[
                      mp_pose.PoseLandmark.LEFT_ELBOW].visibility))
 
-            keypoints[folder][name]['re'] = round_tuple(
+            keypoints[folder][name]['keypoints']['re'] = round_tuple(
                 (results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].x,
                  results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].y,
                  depth_img[int(results.pose_landmarks.landmark[
@@ -144,7 +144,7 @@ def get_keypoints(image_files, mp_pose, keypoints, folder):
                  results.pose_landmarks.landmark[
                      mp_pose.PoseLandmark.RIGHT_ELBOW].visibility))
 
-            keypoints[folder][name]['ls'] = round_tuple(
+            keypoints[folder][name]['keypoints']['ls'] = round_tuple(
                 (results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].x,
                  results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].y,
                  depth_img[int(results.pose_landmarks.landmark[
@@ -154,7 +154,7 @@ def get_keypoints(image_files, mp_pose, keypoints, folder):
                  results.pose_landmarks.landmark[
                      mp_pose.PoseLandmark.LEFT_SHOULDER].visibility))
 
-            keypoints[folder][name]['rs'] = round_tuple(
+            keypoints[folder][name]['keypoints']['rs'] = round_tuple(
                 (results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].x,
                  results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].y,
                  depth_img[int(results.pose_landmarks.landmark[
@@ -219,7 +219,7 @@ def get_bounding_boxes(folder, image_name, keypoints_data, save_path, save=True,
 
         bboxes[folder][image_name] = {}
 
-        keypoints = keypoints_data[folder][image_name]
+        keypoints = keypoints_data[folder][image_name]['keypoints']
         h, w = image.shape[:2]
 
         if 'lh' in keypoints and keypoints['lh'][3] > VISIBILITY_THRESHOLD:
@@ -262,26 +262,28 @@ def set_metadata(folder, img_name, keypoints, subject, hands):
 
         # metadata['o_lh'] = 0 left hand occluded
         # metadata['o_lh'] = 1 left hand not occluded
-        metadata['o_lh'] = 0 if metadata['lh'][3] < VISIBILITY_THRESHOLD else 1
-        metadata['o_rh'] = 0 if metadata['rh'][3] < VISIBILITY_THRESHOLD else 1
+        metadata['occlusion_flags'] = {}
+        metadata['occlusion_flags']['o_lh'] = 0 if metadata['lh'][3] < VISIBILITY_THRESHOLD else 1
+        metadata['occlusion_flags']['o_rh'] = 0 if metadata['rh'][3] < VISIBILITY_THRESHOLD else 1
 
         # if not occluded then check if hand wears glove or not
         # metadata['g_lh'] = 1 left bare hand
         # metadata['g_lh'] = 0 left gloved hand
         # metadata['g_lh'] = -1 left hand occluded
-        if metadata['o_lh']:
+        metadata['gloves_flag'] = {}
+        if metadata['occlusion_flags']['o_lh']:
             box_name = os.path.join(dataset_path, 'gloves_task', f'gloves_{subject}', f"{img_name[:-5]}_l_box.jpeg")
-            metadata['g_lh'] = 1 if detect_hand_in_image(hands, box_name) else 0
+            metadata['gloves_flag']['g_lh'] = 1 if detect_hand_in_image(hands, box_name) else 0
             print(f'Image {box_name} processed.')
         else:
-            metadata['g_lh'] = -1
+            metadata['gloves_flag']['g_lh'] = -1
 
-        if metadata['o_rh']:
+        if metadata['occlusion_flags']['o_rh']:
             box_name = os.path.join(dataset_path, 'gloves_task', f'gloves_{subject}', f"{img_name[:-5]}_r_box.jpeg")
-            metadata['g_rh'] = 1 if detect_hand_in_image(hands, box_name) else 0
+            metadata['gloves_flag']['g_rh'] = 1 if detect_hand_in_image(hands, box_name) else 0
             print(f'Image {box_name} processed.')
         else:
-            metadata['g_rh'] = -1
+            metadata['gloves_flag']['g_rh'] = -1
 
     except Exception as e:
         print(f"Error processing image {img_name}: {e}")
