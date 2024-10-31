@@ -48,7 +48,7 @@ def read_depth_map_from_json(file_path):
         with open(file_path, 'r') as f:
             data = json.load(f)
             if 'depthMap' in data:
-                return np.array(data['depthMap'])
+                return data['depthMap']
             else:
                 return None
     except FileNotFoundError:
@@ -79,7 +79,15 @@ def round_tuple(values):
 
 
 def get_keypoints(image_files, mp_pose, keypoints, folder):
-    folder = os.path.relpath(folder, start=os.path.join(os.getcwd(), 'dataset'))
+
+    timestamp = folder.split('\\')[-1]
+    glove = folder.split('\\')[-2]
+    subject = folder.split('\\')[-3].split(' ')[0]
+
+    if glove == 'guanto tolto':
+        folder = subject + '_gt_' + timestamp
+    else:
+        folder = subject + '_gnt_' + timestamp
 
     if folder not in keypoints:
         keypoints[folder] = {}
@@ -94,75 +102,58 @@ def get_keypoints(image_files, mp_pose, keypoints, folder):
             image = resize(image, 256, 192)
             results = pose.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 
-            # image_height, _ = image.shape
+            height, width, _ = image.shape
 
             if not results.pose_landmarks:
                 continue
 
             depth_map = read_depth_map_from_json(im_name.replace('.jpeg', '.json'))
-            depth_img = np.stack((depth_map,) * 3, axis=-1)
+            depth_img = np.reshape(depth_map, (192, 256))
 
+            keypoints[folder][name] = {}
             keypoints[folder][name]['keypoints'] = {}
 
             keypoints[folder][name]['keypoints']['lh'] = round_tuple(
                 (results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].x,
                  results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].y,
-                 depth_img[int(results.pose_landmarks.landmark[
-                                   mp_pose.PoseLandmark.LEFT_WRIST].y),
-                           int(results.pose_landmarks.landmark[
-                                   mp_pose.PoseLandmark.LEFT_WRIST].x)][0],
-                 results.pose_landmarks.landmark[
-                     mp_pose.PoseLandmark.LEFT_WRIST].visibility))
+                 depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].y*height),
+                           int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].x*width)],
+                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].visibility))
 
             keypoints[folder][name]['keypoints']['rh'] = round_tuple(
                 (results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].x,
                  results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].y,
-                 depth_img[int(results.pose_landmarks.landmark[
-                                   mp_pose.PoseLandmark.RIGHT_WRIST].y),
-                           int(results.pose_landmarks.landmark[
-                                   mp_pose.PoseLandmark.RIGHT_WRIST].x)][0],
-                 results.pose_landmarks.landmark[
-                     mp_pose.PoseLandmark.RIGHT_WRIST].visibility))
+                 depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].y*height),
+                           int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].x*width)],
+                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].visibility))
 
             keypoints[folder][name]['keypoints']['le'] = round_tuple(
                 (results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].x,
                  results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].y,
-                 depth_img[int(results.pose_landmarks.landmark[
-                                   mp_pose.PoseLandmark.LEFT_ELBOW].y),
-                           int(results.pose_landmarks.landmark[
-                                   mp_pose.PoseLandmark.LEFT_ELBOW].x)][0],
-                 results.pose_landmarks.landmark[
-                     mp_pose.PoseLandmark.LEFT_ELBOW].visibility))
+                 depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].y*height),
+                           int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].x*width)],
+                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].visibility))
 
             keypoints[folder][name]['keypoints']['re'] = round_tuple(
                 (results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].x,
                  results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].y,
-                 depth_img[int(results.pose_landmarks.landmark[
-                                   mp_pose.PoseLandmark.RIGHT_ELBOW].y),
-                           int(results.pose_landmarks.landmark[
-                                   mp_pose.PoseLandmark.RIGHT_ELBOW].x)][0],
-                 results.pose_landmarks.landmark[
-                     mp_pose.PoseLandmark.RIGHT_ELBOW].visibility))
+                 depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].y*height),
+                           int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].x*width)],
+                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].visibility))
 
             keypoints[folder][name]['keypoints']['ls'] = round_tuple(
                 (results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].x,
                  results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].y,
-                 depth_img[int(results.pose_landmarks.landmark[
-                                   mp_pose.PoseLandmark.LEFT_SHOULDER].y),
-                           int(results.pose_landmarks.landmark[
-                                   mp_pose.PoseLandmark.LEFT_SHOULDER].x)][0],
-                 results.pose_landmarks.landmark[
-                     mp_pose.PoseLandmark.LEFT_SHOULDER].visibility))
+                 depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].y*height),
+                           int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].x*width)],
+                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].visibility))
 
             keypoints[folder][name]['keypoints']['rs'] = round_tuple(
                 (results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].x,
                  results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].y,
-                 depth_img[int(results.pose_landmarks.landmark[
-                                   mp_pose.PoseLandmark.RIGHT_SHOULDER].y),
-                           int(results.pose_landmarks.landmark[
-                                   mp_pose.PoseLandmark.RIGHT_SHOULDER].x)][0],
-                 results.pose_landmarks.landmark[
-                     mp_pose.PoseLandmark.RIGHT_SHOULDER].visibility))
+                 depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].y*height),
+                           int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].x*width)],
+                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].visibility))
 
             print(f'Image {im_name} processed.')
 
@@ -254,17 +245,17 @@ def get_bounding_boxes(folder, image_name, keypoints_data, save_path, save=True,
         print(f"Error processing image {image_path}: {e}")
 
 
-def set_metadata(folder, img_name, keypoints, subject, hands):
+def set_metadata(seq_id, img_name, keypoints, subject, hands):
     dataset_path = os.path.join(os.path.dirname(os.getcwd()), 'dataset')
 
     try:
-        metadata = keypoints[folder][img_name]
+        metadata = keypoints[seq_id][img_name]
 
         # metadata['o_lh'] = 0 left hand occluded
         # metadata['o_lh'] = 1 left hand not occluded
         metadata['occlusion_flags'] = {}
-        metadata['occlusion_flags']['o_lh'] = 0 if metadata['lh'][3] < VISIBILITY_THRESHOLD else 1
-        metadata['occlusion_flags']['o_rh'] = 0 if metadata['rh'][3] < VISIBILITY_THRESHOLD else 1
+        metadata['occlusion_flags']['o_lh'] = 0 if metadata['keypoints']['lh'][3] < VISIBILITY_THRESHOLD else 1
+        metadata['occlusion_flags']['o_rh'] = 0 if metadata['keypoints']['rh'][3] < VISIBILITY_THRESHOLD else 1
 
         # if not occluded then check if hand wears glove or not
         # metadata['g_lh'] = 1 left bare hand

@@ -4,7 +4,7 @@ from utils import read_json
 
 
 def frame_to_text(sequence_id, frame, sequence):
-    timestamp = frame[:-5]
+    timestamp = frame.split('_')[0]
     keypoints = sequence[frame]['keypoints']
     gloves = sequence[frame]['gloves_flag']
     occlusion = sequence[frame]['occlusion_flags']
