@@ -8,6 +8,17 @@ from utils import resize
 
 matplotlib.use('TkAgg')
 
+def pixelate_image(image, pixel_size):
+    # Riduci la risoluzione
+    small = cv2.resize(image,
+                       (image.shape[1] // pixel_size, image.shape[0] // pixel_size),
+                       interpolation=cv2.INTER_LINEAR)
+    # Ripristina alla risoluzione originale
+    pixelated = cv2.resize(small,
+                           (image.shape[1], image.shape[0]),
+                           interpolation=cv2.INTER_NEAREST)
+    return pixelated
+
 mp_pose = mp.solutions.pose
 
 with mp_pose.Pose(static_image_mode=True, min_detection_confidence=0.5, model_complexity=2) as pose:
@@ -19,11 +30,16 @@ with mp_pose.Pose(static_image_mode=True, min_detection_confidence=0.5, model_co
     cv2.imshow('img', img)
     cv2.waitKey()
 
-    # img = cv2.blur(img, (13, 13))
-    # cv2.imshow('img', img)
-    # cv2.waitKey()
+    pixel_sizes = [2, 4, 8, 16, 32]
+
+    # Applica il filtro a diversi livelli di intensità
+    pixelated_images = [pixelate_image(img, size) for size in pixel_sizes]
 
     results = pose.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+
+    for img in pixelated_images:
+        cv2.imshow('pixelated', img)
+        cv2.waitKey()
 
     # Get pose landmarks and all detected points
     dic = {}
@@ -50,5 +66,5 @@ with mp_pose.Pose(static_image_mode=True, min_detection_confidence=0.5, model_co
     cv2.imshow('ann', annotated_image)
     cv2.waitKey()
 
-    mp_drawing.plot_landmarks(
-        results.pose_world_landmarks, mp_pose.POSE_CONNECTIONS)
+    # mp_drawing.plot_landmarks(
+    #     results.pose_world_landmarks, mp_pose.POSE_CONNECTIONS)
