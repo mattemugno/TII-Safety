@@ -1,34 +1,73 @@
 import os
-import shutil
-
+import json
+import cv2
 import mediapipe as mp
 
 from utils import detect_hand_in_image
 
-dataset_path = os.path.join(os.path.dirname(os.getcwd()), 'dataset')
-
-subjects = ["francesco", "matteo", "michele", "michela"]
+# --- CONFIGURAZIONE DI BASE -----------------------------------------
+BASE_DIR = os.path.join(os.path.dirname(os.getcwd()), 'data')
+DATASET_PATH = os.path.join(BASE_DIR, 'dataset')
+SUBJECTS = ["francesco", "matteo", "michele", "michela"]
 
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode=True, max_num_hands=2, min_detection_confidence=0.5)
+hands = mp_hands.Hands(
+    static_image_mode=True,
+    max_num_hands=1,
+    min_detection_confidence=0.5
+)
 
-for subject in subjects:
+PATCH_RADIUS = 50
 
-    subject_gloves_path = os.path.join(dataset_path, 'gloves_task', 'gloves_' + f'{subject}')
+for subject in SUBJECTS:
+    subj_folder = os.path.join(DATASET_PATH, f'{subject} gloves')
 
-    positive_folder = os.path.join(subject_gloves_path, "positive")
-    negative_folder = os.path.join(subject_gloves_path, "negative")
+    # carica i keypoints già calcolati
+    kp_path = os.path.join(subj_folder, f'keypoints {subject}.json')
+    with open(kp_path, 'r') as f:
+        kp_dict = json.load(f)
 
-    if not os.path.exists(positive_folder) and not os.path.exists(negative_folder):
-        os.makedirs(positive_folder)
-        os.makedirs(negative_folder)
+    annotations = {}
 
-    for filename in os.listdir(subject_gloves_path):
-        if filename.endswith(".jpeg"):
-            image_path = os.path.join(subject_gloves_path, filename)
-            if detect_hand_in_image(hands, image_path):
-                shutil.move(image_path, positive_folder)
-            else:
-                shutil.move(image_path, negative_folder)
+    for session in os.listdir(subj_folder):
+        if os.path.isdir(os.path.join(subj_folder, session)):
+            session_path = os.path.join(subj_folder, session)
+            data_dir = os.path.join(session_path, 'data')
 
-            print(f'Image {image_path} labelled.')
+            for fname in os.listdir(data_dir):
+                full_img_path = os.path.join(data_dir, fname)
+                img = cv2.imread(full_img_path)
+                if img is None:
+                    continue
+
+                h, w = img.shape[:2]
+                entry = [0, 0]  # [left, right]
+
+                if fname in kp_dict:
+                    kp_info = kp_dict[fname]['keypoints']
+
+                    # iterate on left hand (lh) and right hand (rh)
+                    for idx, hand_label in enumerate(('lh', 'rh')):
+                        if hand_label not in kp_info:
+                            continue
+                        x_norm, y_norm, _, vis = kp_info[hand_label]
+                        if vis < 0.5:
+                            continue
+
+                        cx = int(x_norm * w)
+                        cy = int(y_norm * h)
+                        x1 = max(cx - PATCH_RADIUS, 0)
+                        x2 = min(cx + PATCH_RADIUS, w)
+                        y1 = max(cy - PATCH_RADIUS, 0)
+                        y2 = min(cy + PATCH_RADIUS, h)
+                        patch = img[y1:y2, x1:x2]
+
+                        entry[idx] = 0 if detect_hand_in_image(hands, patch) else 1
+
+                annotations[fname] = entry
+
+    out_path = os.path.join(subj_folder, f'annotations_{subject}.json')
+    with open(out_path, 'w') as f:
+        json.dump(annotations, f, indent=2)
+
+    print(f"[✔] Annotations for {subject} written to {out_path}")

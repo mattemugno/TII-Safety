@@ -11,17 +11,11 @@ VISIBILITY_THRESHOLD = 0.5
 def get_image_files(img_path):
     image_files = {}
     for root, dirs, files in os.walk(img_path):
-        for dir in dirs:
-            dir_path = os.path.join(root, dir)
-            for subdir in os.listdir(dir_path):
-                subdir_path = os.path.join(dir_path, subdir)
-                if os.path.isdir(subdir_path):
-                    data_path = os.path.join(subdir_path, 'data')
-                    if os.path.isdir(data_path):
-                        image_files[subdir_path] = []
-                        for file in os.listdir(data_path):
-                            if file.endswith('.jpeg'):
-                                image_files[subdir_path].append(os.path.join(data_path, file))
+        if os.path.basename(root) == 'data':
+            jpeg_files = [os.path.join(root, f) for f in files if f.endswith('.jpeg')]
+            if jpeg_files:
+                parent_dir = os.path.dirname(root)
+                image_files[parent_dir] = jpeg_files
     return image_files
 
 
@@ -78,94 +72,85 @@ def round_tuple(values):
     return tuple(round(v, 4) for v in values)
 
 
-def get_keypoints(image_files, mp_pose, keypoints, folder):
-
-    timestamp = folder.split('\\')[-1]
-    glove = folder.split('\\')[-2]
-    subject = folder.split('\\')[-3].split(' ')[0]
-
-    if glove == 'guanto tolto':
-        folder = subject + '_gt_' + timestamp
-    else:
-        folder = subject + '_gnt_' + timestamp
-
-    if folder not in keypoints:
-        keypoints[folder] = {}
+def get_keypoints(image_files, mp_pose, keypoints):
 
     with mp_pose.Pose(
             static_image_mode=True, min_detection_confidence=0.5, model_complexity=2) as pose:
         for im_name in image_files:
 
             image = cv2.imread(im_name)
-            name = im_name.split('\\')[-1]
 
             image = resize(image, 256, 192)
             results = pose.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-
-            height, width, _ = image.shape
 
             if not results.pose_landmarks:
                 continue
 
             depth_map = read_depth_map_from_json(im_name.replace('.jpeg', '.json'))
-            depth_img = np.reshape(depth_map, (192, 256))
+            height, width, _ = image.shape
+            depth_img = np.reshape(depth_map, (height, width))
 
-            keypoints[folder][name] = {}
-            keypoints[folder][name]['keypoints'] = {}
+            name = im_name.split('/')[-1]
 
-            keypoints[folder][name]['keypoints']['lh'] = round_tuple(
-                (results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].x,
-                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].y,
-                 depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].y*height),
-                           int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].x*width)],
-                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].visibility))
+            try:
+                keypoints[name] = {}
+                keypoints[name]['keypoints'] = {}
 
-            keypoints[folder][name]['keypoints']['rh'] = round_tuple(
-                (results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].x,
-                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].y,
-                 depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].y*height),
-                           int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].x*width)],
-                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].visibility))
+                keypoints[name]['keypoints']['lh'] = round_tuple(
+                    (results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].x,
+                     results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].y,
+                     depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].y*height),
+                               int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].x*width)],
+                     results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_WRIST].visibility))
 
-            keypoints[folder][name]['keypoints']['le'] = round_tuple(
-                (results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].x,
-                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].y,
-                 depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].y*height),
-                           int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].x*width)],
-                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].visibility))
+                keypoints[name]['keypoints']['rh'] = round_tuple(
+                    (results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].x,
+                     results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].y,
+                     depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].y*height),
+                               int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].x*width)],
+                     results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST].visibility))
 
-            keypoints[folder][name]['keypoints']['re'] = round_tuple(
-                (results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].x,
-                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].y,
-                 depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].y*height),
-                           int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].x*width)],
-                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].visibility))
+                keypoints[name]['keypoints']['le'] = round_tuple(
+                    (results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].x,
+                     results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].y,
+                     depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].y*height),
+                               int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].x*width)],
+                     results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ELBOW].visibility))
 
-            keypoints[folder][name]['keypoints']['ls'] = round_tuple(
-                (results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].x,
-                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].y,
-                 depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].y*height),
-                           int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].x*width)],
-                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].visibility))
+                keypoints[name]['keypoints']['re'] = round_tuple(
+                    (results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].x,
+                     results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].y,
+                     depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].y*height),
+                               int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].x*width)],
+                     results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ELBOW].visibility))
 
-            keypoints[folder][name]['keypoints']['rs'] = round_tuple(
-                (results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].x,
-                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].y,
-                 depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].y*height),
-                           int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].x*width)],
-                 results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].visibility))
+                keypoints[name]['keypoints']['ls'] = round_tuple(
+                    (results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].x,
+                     results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].y,
+                     depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].y*height),
+                               int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].x*width)],
+                     results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].visibility))
 
-            print(f'Image {im_name} processed.')
+                keypoints[name]['keypoints']['rs'] = round_tuple(
+                    (results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].x,
+                     results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].y,
+                     depth_img[int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].y*height),
+                               int(results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].x*width)],
+                     results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER].visibility))
+
+                print(f'Image {im_name} processed.')
+            except Exception as e:
+                print(f"Error processing image {im_name}: {e}")
+                continue
 
 
-def detect_hand_in_image(hands, image_path):
+
+def detect_hand_in_image(hands, patch):
     try:
-        image = cv2.imread(image_path)
-
-        if image is None:
+        if patch is None:
             raise ValueError("The image does not exist.")
 
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image_rgb = cv2.cvtColor(patch, cv2.COLOR_BGR2RGB)
         result = hands.process(image_rgb)
         if result.multi_hand_landmarks:
             return True
@@ -184,12 +169,12 @@ def get_bounding_boxes(folder, image_name, keypoints_data, save_path, save=True,
     :param folder: The folder name where the image is located within the dataset.
     :param image_name: The name of the image file to be processed.
     :param keypoints_data: Dictionary containing keypoints data with the structure
-                            keypoints_data[folder][image_name]['lh'] or ['rh'], where 'lh' refers to left hand
+                            keypoints_data[image_name]['lh'] or ['rh'], where 'lh' refers to left hand
                             and 'rh' to right hand. Each contains keypoints and a visibility score.
     :param save_path: The path where the cropped images with bounding boxes will be saved.
     :param save: If True, saves the cropped images with bounding boxes. Default is True.
     :param bboxes: Dictionary to store bounding box coordinates for each image. If None, no bounding
-                            box information will be stored. Structure should be bboxes[folder][image_name]['lh']
+                            box information will be stored. Structure should be bboxes[image_name]['lh']
                             or ['rh'].
     :returns: None: The function processes the image, draws bounding boxes if keypoints are visible, and optionally
                     saves the cropped images and bounding box data.
@@ -206,11 +191,11 @@ def get_bounding_boxes(folder, image_name, keypoints_data, save_path, save=True,
             return
 
         if bboxes is not None and folder not in bboxes:
-            bboxes[folder] = {}
+            bboxes = {}
 
-        bboxes[folder][image_name] = {}
+        bboxes[image_name] = {}
 
-        keypoints = keypoints_data[folder][image_name]['keypoints']
+        keypoints = keypoints_data[image_name]['keypoints']
         h, w = image.shape[:2]
 
         if 'lh' in keypoints and keypoints['lh'][3] > VISIBILITY_THRESHOLD:
@@ -219,7 +204,7 @@ def get_bounding_boxes(folder, image_name, keypoints_data, save_path, save=True,
             y = int(y * h)
             box = image[max(0, y - 150):min(h, y + 150), max(0, x - 150):min(w, x + 150)]
             if bboxes is not None:
-                bboxes[folder][image_name]['lh'] = [max(0, x - 150), max(0, y - 150), min(w, x + 150),
+                bboxes[image_name]['lh'] = [max(0, x - 150), max(0, y - 150), min(w, x + 150),
                                                     min(h, y + 150)]
             if save:
                 box_filename = f"{image_name[:-5]}_l_box.jpeg"
@@ -232,7 +217,7 @@ def get_bounding_boxes(folder, image_name, keypoints_data, save_path, save=True,
             y = int(y * h)
             box = image[max(0, y - 150):min(h, y + 150), max(0, x - 150):min(w, x + 150)]
             if bboxes is not None:
-                bboxes[folder][image_name]['rh'] = [max(0, x - 150), max(0, y - 150), min(w, x + 150),
+                bboxes[image_name]['rh'] = [max(0, x - 150), max(0, y - 150), min(w, x + 150),
                                                     min(h, y + 150)]
             if save:
                 box_filename = f"{image_name[:-5]}_r_box.jpeg"
