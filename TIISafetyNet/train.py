@@ -5,9 +5,10 @@ from torch import optim
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
-from transformers import ViTFeatureExtractor, ViTForImageClassification
-
+from transformers import ViTForImageClassification
+from torch.utils.data import WeightedRandomSampler
 from TIISafetyNet.load_dataset import get_transforms, TIIDataset
+
 
 def train_epoch(model, loader, criterion, optimizer, device):
     model.train()
@@ -49,14 +50,32 @@ def main(args):
     train_ds, val_ds, test_ds = random_split(full_dataset, [train_size, val_size, test_size],
                                              generator=torch.Generator().manual_seed(args.seed))
 
+    from collections import Counter
+    labels = [label for _, label in full_dataset.samples]
+    counter = Counter(labels)
+    print(f"Total samples: {total}")
+    print(f"Class distribution -> no-glove (0): {counter.get(0, 0)}, glove (1): {counter.get(1, 0)}")
+
     # assign transforms
     train_ds.dataset.transform = train_transform
     val_ds.dataset.transform = val_transform
     test_ds.dataset.transform = val_transform
 
+    # DataLoaders with oversampling for minority class
+    train_labels = [train_ds.dataset.samples[i][1] for i in train_ds.indices]
+    label_counts = Counter(train_labels)
+    # Inverse frequency weights
+    weights = [1.0 / label_counts[label] for label in train_labels]
+    sampler = WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
+
     # loaders
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size,
-                              shuffle=True, num_workers=args.num_workers)
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=args.batch_size,
+        sampler=sampler,
+        num_workers=args.num_workers,
+        pin_memory=True
+    )
     val_loader = DataLoader(val_ds, batch_size=args.batch_size,
                             shuffle=False, num_workers=args.num_workers)
     test_loader = DataLoader(test_ds, batch_size=args.batch_size,
@@ -78,7 +97,7 @@ def main(args):
     model = ViTForImageClassification.from_pretrained(
         'google/vit-base-patch16-224',
         num_labels=2,
-        ignore_mismatched_sizes=True  # rebuilds head for new num_labels
+        ignore_mismatched_sizes=True
     )
     model.to(device)
 
@@ -109,11 +128,11 @@ if __name__ == '__main__':
         description='PyTorch DataLoader for glove/no-glove dataset')
     parser.add_argument('--data-root', type=str, default='../data/dataset',
                         help='Root directory containing subfolders with JSON and images')
-    parser.add_argument('--batch-size', type=int, default=16,
+    parser.add_argument('--batch-size', type=int, default=32,
                         help='Batch size')
-    parser.add_argument('--num-workers', type=int, default=2,
+    parser.add_argument('--num-workers', type=int, default=8,
                         help='DataLoader worker count')
-    parser.add_argument('--blur', action='store_true',
+    parser.add_argument('--blur', default=True, action='store_true',
                         help='Apply random Gaussian blur on training images')
     parser.add_argument('--train-split', type=float, default=0.7,
                         help='Fraction of data for training')

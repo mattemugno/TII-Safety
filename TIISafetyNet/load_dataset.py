@@ -1,40 +1,53 @@
-import os
 import json
-import argparse
+import os
+
+import cv2
+import numpy as np
 from PIL import Image
-import torch
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset
 from torchvision import transforms
 
+class GaussianBlur:
+    def __init__(self, ksize=(33, 33)):
+        self.ksize = ksize
+
+    def __call__(self, img):
+        if not isinstance(img, Image.Image):
+            raise TypeError("Expected PIL.Image")
+
+        img_np = np.array(img)
+        img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+        blurred = cv2.GaussianBlur(img_np, self.ksize, 0)
+        blurred = cv2.cvtColor(blurred, cv2.COLOR_BGR2RGB)
+        return Image.fromarray(blurred)
 
 def get_transforms(blur: bool = True):
-    """
-    Returns training and validation transforms.
-    If blur=True, applies a random Gaussian blur on training images.
-    """
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
     train_ops = []
+    val_ops   = []
+
     if blur:
-        train_ops.append(transforms.RandomApply([
-            transforms.GaussianBlur(kernel_size=5, sigma=(1.0, 3.0))
-        ], p=0.8))
+        blur_transform = GaussianBlur()
+        train_ops.append(blur_transform)
+        val_ops.append(blur_transform)
 
     train_ops += [
-        transforms.Resize((224, 224)),
+        transforms.Resize((192, 256)),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         normalize
     ]
 
-    val_ops = [
-        transforms.Resize((224, 224)),
+    val_ops += [
+        transforms.Resize((192, 256)),
         transforms.ToTensor(),
         normalize
     ]
 
     return transforms.Compose(train_ops), transforms.Compose(val_ops)
+
 
 
 class TIIDataset(Dataset):
@@ -75,6 +88,7 @@ class TIIDataset(Dataset):
                     entry = ann_data.get(fname)
                     if entry is None:
                         continue
+
                     # Expect entry like [0, 1] or {'left':0,'right':1}
                     if isinstance(entry, list) and len(entry) == 2:
                         left_label, right_label = int(entry[0]), int(entry[1])
@@ -83,17 +97,8 @@ class TIIDataset(Dataset):
                     else:
                         continue
 
-                    # Collapse labels if needed
-                    if self.collapse == 'any':
-                        label = int(bool(left_label or right_label))
-                    elif self.collapse == 'left':
-                        label = left_label
-                    elif self.collapse == 'right':
-                        label = right_label
-                    elif self.collapse == 'both':
-                        label = int(bool(left_label and right_label))
-                    else:
-                        raise ValueError(f"Unknown collapse mode: {self.collapse}")
+                    # 1: safe, 0: unsafe
+                    label = int(bool(left_label and right_label))
                     self.samples.append((img_path, label))
 
     def __len__(self):
@@ -102,6 +107,5 @@ class TIIDataset(Dataset):
     def __getitem__(self, idx):
         img_path, label = self.samples[idx]
         img = Image.open(img_path).convert('RGB')
-        if self.transform:
-            img = self.transform(img)
+        img = self.transform(img) if self.transform else img
         return img, label
