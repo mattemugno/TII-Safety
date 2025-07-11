@@ -5,7 +5,6 @@ import cv2
 import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
-from torchvision import transforms
 
 class GaussianBlur:
     def __init__(self, ksize=(33, 33)):
@@ -21,34 +20,6 @@ class GaussianBlur:
         blurred = cv2.cvtColor(blurred, cv2.COLOR_BGR2RGB)
         return Image.fromarray(blurred)
 
-def get_transforms(blur: bool = True):
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-
-    train_ops = []
-    val_ops   = []
-
-    if blur:
-        blur_transform = GaussianBlur()
-        train_ops.append(blur_transform)
-        val_ops.append(blur_transform)
-
-    train_ops += [
-        transforms.Resize((192, 256)),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        normalize
-    ]
-
-    val_ops += [
-        transforms.Resize((192, 256)),
-        transforms.ToTensor(),
-        normalize
-    ]
-
-    return transforms.Compose(train_ops), transforms.Compose(val_ops)
-
-
 
 class TIIDataset(Dataset):
     """
@@ -60,6 +31,7 @@ class TIIDataset(Dataset):
         self.transform = transform
         self.collapse = collapse
         self.samples = []
+        self.blur = GaussianBlur()
 
         # Iterate subjects
         for subj in os.listdir(root_dir):
@@ -106,6 +78,8 @@ class TIIDataset(Dataset):
 
     def __getitem__(self, idx):
         img_path, label = self.samples[idx]
-        img = Image.open(img_path).convert('RGB')
-        img = self.transform(img) if self.transform else img
-        return img, label
+        image = Image.open(img_path).convert('RGB')
+        image = self.blur(image)
+        if self.transform:
+            image = self.transform(image)
+        return {'pixel_values': image, 'labels': label}

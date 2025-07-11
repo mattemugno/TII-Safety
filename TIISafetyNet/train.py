@@ -1,150 +1,114 @@
 import argparse
+from collections import Counter
 
+import numpy as np
 import torch
-from torch import optim
-from torch.nn import CrossEntropyLoss
-from torch.utils.data import DataLoader, random_split
-from tqdm import tqdm
-from transformers import ViTForImageClassification
-from torch.utils.data import WeightedRandomSampler
-from TIISafetyNet.load_dataset import get_transforms, TIIDataset
+from evaluate import load
+from torch.utils.data import random_split
+from transformers import ViTForImageClassification, TrainingArguments, Trainer, ViTImageProcessor
+
+from TIISafetyNet.load_dataset import TIIDataset
 
 
-def train_epoch(model, loader, criterion, optimizer, device):
-    model.train()
-    total_loss = 0.0
-    for images, labels in tqdm(loader, desc='Training'):
-        images, labels = images.to(device), labels.to(device)
-        optimizer.zero_grad()
-        outputs = model(images).logits
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-    return total_loss / len(loader)
+def collate_fn(batch):
+    return {
+        'pixel_values': torch.stack([x['pixel_values'] for x in batch]),
+        'labels': torch.tensor([x['labels'] for x in batch])
+    }
 
 
-def eval_epoch(model, loader, device):
-    model.eval()
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for images, labels in tqdm(loader, desc='Validation'):
-            images, labels = images.to(device), labels.to(device)
-            outputs = model(images).logits
-            preds = torch.argmax(outputs, dim=1)
-            correct += (preds == labels).sum().item()
-            total += labels.size(0)
-    return correct / total if total > 0 else 0
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    preds = np.argmax(logits, axis=-1)
+    return load('accuracy').compute(predictions=preds, references=labels)
+
 
 def main(args):
-    train_transform, val_transform = get_transforms(args.blur)
+    # Initialize processor
+    processor = ViTImageProcessor.from_pretrained(args.model_name)
+    transform = lambda img: processor(img, return_tensors='pt')['pixel_values'].squeeze(0)
 
-    # load full dataset
-    full_dataset = TIIDataset(args.data_root, transform=None)
-    total = len(full_dataset)
-    train_size = int(total * args.train_split)
-    val_size = int(total * args.val_split)
-    test_size = total - train_size - val_size
+    # Load dataset with transform
+    dataset = TIIDataset(args.data_root, transform=transform)
+    total = len(dataset)
+    train_len = int(total * args.train_split)
+    val_len = int(total * args.val_split)
+    test_len = total - train_len - val_len
 
-    train_ds, val_ds, test_ds = random_split(full_dataset, [train_size, val_size, test_size],
-                                             generator=torch.Generator().manual_seed(args.seed))
+    train_ds, val_ds, test_ds = random_split(
+        dataset, [train_len, val_len, test_len],
+        generator=torch.Generator().manual_seed(args.seed)
+    )
 
-    from collections import Counter
-    labels = [label for _, label in full_dataset.samples]
+    # Print overview
+    labels = [lbl for _, lbl in dataset.samples]
     counter = Counter(labels)
     print(f"Total samples: {total}")
-    print(f"Class distribution -> no-glove (0): {counter.get(0, 0)}, glove (1): {counter.get(1, 0)}")
+    print(f"Class distribution -> unsafe (0): {counter.get(0, 0)}, safe (1): {counter.get(1, 0)}")
+    print(f"Splits (train/val/test): {train_len}/{val_len}/{test_len}")
 
-    # assign transforms
-    train_ds.dataset.transform = train_transform
-    val_ds.dataset.transform = val_transform
-    test_ds.dataset.transform = val_transform
-
-    # DataLoaders with oversampling for minority class
-    train_labels = [train_ds.dataset.samples[i][1] for i in train_ds.indices]
-    label_counts = Counter(train_labels)
-    # Inverse frequency weights
-    weights = [1.0 / label_counts[label] for label in train_labels]
-    sampler = WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
-
-    # loaders
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=args.batch_size,
-        sampler=sampler,
-        num_workers=args.num_workers,
-        pin_memory=True
-    )
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size,
-                            shuffle=False, num_workers=args.num_workers)
-    test_loader = DataLoader(test_ds, batch_size=args.batch_size,
-                             shuffle=False, num_workers=args.num_workers)
-
-    print(f"Total samples: {total}")
-    print(f"Train/Val/Test splits: {train_size}/{val_size}/{test_size}")
-    print(f"Batches per split: {len(train_loader)}/{len(val_loader)}/{len(test_loader)}")
-
-    # Example iteration
-    imgs, labels = next(iter(train_loader))
-    print("Batch img tensor shape", imgs.shape)
-    print("Batch labels", labels.shape)
-
-    # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Initialize ViT model
+    # Load model
     model = ViTForImageClassification.from_pretrained(
-        'google/vit-base-patch16-224',
-        num_labels=2,
-        ignore_mismatched_sizes=True
+        args.model_name, num_labels=2, ignore_mismatched_sizes=True
     )
+
     model.to(device)
+    # Training arguments
+    training_args = TrainingArguments(
+        output_dir=args.output_dir,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
+        num_train_epochs=args.epochs,
+        eval_strategy='steps',
+        eval_steps=args.eval_steps,
+        logging_steps=args.logging_steps,
+        save_steps=args.save_steps,
+        learning_rate=args.lr,
+        fp16=torch.cuda.is_available(),
+        remove_unused_columns=False,
+        load_best_model_at_end=True,
+        save_total_limit=2,
+    )
 
-    # Optimizer and loss
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr)
-    criterion = CrossEntropyLoss()
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_ds,
+        eval_dataset=val_ds,
+        data_collator=collate_fn,
+        compute_metrics=compute_metrics,
+        tokenizer=processor,
+    )
 
-    best_val_acc = 0.0
-    for epoch in range(1, args.epochs + 1):
-        train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
-        val_acc = eval_epoch(model, val_loader, device)
-        print(f"Epoch {epoch}/{args.epochs} - Loss: {train_loss:.4f}, Val Acc: {val_acc:.4f}")
+    # Train & evaluate
+    train_results = trainer.train()
+    trainer.log_metrics("train", train_results.metrics)
+    trainer.save_metrics("train", train_results.metrics)
+    trainer.save_model()
+    print("Training completed.")
 
-        # Save best model
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            torch.save(model.state_dict(), args.save_path)
-            print(f"Saved best model with Val Acc: {val_acc:.4f}")
-
-    # Final test evaluation
-    test_acc = eval_epoch(model, test_loader, device)
-    print(f"Test Accuracy: {test_acc:.4f}")
-
+    metrics = trainer.evaluate(val_ds)
+    trainer.log_metrics("eval", metrics)
+    trainer.save_metrics("eval", metrics)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='PyTorch DataLoader for glove/no-glove dataset')
-    parser.add_argument('--data-root', type=str, default='../data/dataset',
-                        help='Root directory containing subfolders with JSON and images')
-    parser.add_argument('--batch-size', type=int, default=32,
-                        help='Batch size')
-    parser.add_argument('--num-workers', type=int, default=8,
-                        help='DataLoader worker count')
-    parser.add_argument('--blur', default=True, action='store_true',
-                        help='Apply random Gaussian blur on training images')
-    parser.add_argument('--train-split', type=float, default=0.7,
-                        help='Fraction of data for training')
-    parser.add_argument('--val-split', type=float, default=0.15,
-                        help='Fraction of data for validation')
-    parser.add_argument('--seed', type=int, default=42,
-                        help='Random seed for splitting')
-    parser.add_argument('--lr', type=float, default=1e-4,
-                        help='Learning rate')
-    parser.add_argument('--epochs', type=int, default=10,
-                        help='Number of training epochs')
-    parser.add_argument('--save-path', type=str, default='models/vit_glove.pth',
-                        help='Path to save best model')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data-root', type=str, default='../data/dataset')
+    parser.add_argument('--model-name', type=str, default='google/vit-base-patch16-224-in21k')
+    parser.add_argument('--output-dir', type=str, default='vit-base-glove')
+    parser.add_argument('--batch-size', type=int, default=64)
+    parser.add_argument('--num-workers', type=int, default=8)
+    parser.add_argument('--train-split', type=float, default=0.7)
+    parser.add_argument('--val-split', type=float, default=0.15)
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--lr', type=float, default=2e-4)
+    parser.add_argument('--epochs', type=int, default=4)
+    parser.add_argument('--logging-steps', type=int, default=10)
+    parser.add_argument('--eval-steps', type=int, default=100)
+    parser.add_argument('--save-steps', type=int, default=100)
     args = parser.parse_args()
     main(args)
+
