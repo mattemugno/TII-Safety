@@ -57,7 +57,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ViT inference with Gaussian blur")
     parser.add_argument("--image", type=str, default='example_images/154370.015801041_5.jpeg', help="Path to image file")
-    parser.add_argument("--model", type=str, default='models/vit_glove.pth', help="Path to trained model (.pth)")
+    parser.add_argument("--model", type=str, default='vit-base-glove', help="Path to trained model (.pth)")
     parser.add_argument("--kernel-size", type=int, default=7, help="Kernel size for Gaussian blur")
     parser.add_argument("--sigma", type=float, default=2.0, help="Sigma for Gaussian blur")
     args = parser.parse_args()

@@ -37,8 +37,11 @@ def visualize_cam_tensor(img_tensor, cam_map, mean, std):
 
 
 def main(args):
+    # Ensure reproducibility
+    torch.manual_seed(args.seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    # Load model
     hf_model = ViTForImageClassification.from_pretrained(
         args.model_path,
         num_labels=2,
@@ -49,8 +52,11 @@ def main(args):
     model = CAMWrapper(hf_model).to(device)
     processor = ViTImageProcessor.from_pretrained(args.model_name)
 
+    # Data transform
     transform = lambda img: processor(img, return_tensors='pt')['pixel_values'].squeeze(0)
     dataset = TIIDataset(args.data_root, transform=transform)
+
+    # Split dataset
     total = len(dataset)
     train_len = int(total * args.train_split)
     val_len   = int(total * args.val_split)
@@ -77,6 +83,7 @@ def main(args):
         pin_memory=torch.cuda.is_available()
     )
 
+    # Prepare Grad-CAM
     target_layer = hf_model.vit.encoder.layer[-1].layernorm_before
     cam = GradCAM(
         model=model,
@@ -87,25 +94,28 @@ def main(args):
     mean = torch.tensor([0.485, 0.456, 0.406], device=device)
     std  = torch.tensor([0.229, 0.224, 0.225], device=device)
 
-    batch = next(iter(loader))
-    pixels = batch['pixel_values']
-    labels = batch['labels']
-    # debug rapido
-    print("pixels type:", type(pixels), "labels type:", type(labels))
+    # Visualize a grid of images
+    n_images = 9
+    fig, axes = plt.subplots(3, 3, figsize=(9, 9))
+    it = iter(loader)
+    for idx in range(n_images):
+        batch = next(it)
+        pixels = batch['pixel_values'].to(device)
+        lbl = int(batch['labels'][0].item())
 
-    pixels = pixels.to(device)
-    lbl = int(labels[0].item())
+        grayscale_cam = cam(
+            input_tensor=pixels,
+            targets=[ClassifierOutputTarget(lbl)]
+        )[0]
 
-    grayscale_cam = cam(
-        input_tensor=pixels,
-        targets=[ClassifierOutputTarget(lbl)]
-    )[0]  # H x W
+        vis = visualize_cam_tensor(pixels[0], grayscale_cam, mean, std)
 
-    vis = visualize_cam_tensor(pixels[0], grayscale_cam, mean, std)
-    plt.figure(figsize=(5,5))
-    plt.imshow(vis)
-    plt.title(f'Label: {lbl}')
-    plt.axis('off')
+        ax = axes[idx // 3, idx % 3]
+        ax.imshow(vis)
+        ax.set_title(f'Label: {lbl}')
+        ax.axis('off')
+
+    plt.tight_layout()
     plt.show()
 
 
@@ -119,7 +129,8 @@ if __name__ == '__main__':
                         help='Fine-tuned model folder.')
     parser.add_argument('--train-split', type=float, default=0.7)
     parser.add_argument('--val-split',   type=float, default=0.15)
-    parser.add_argument('--seed',        type=int,   default=42)
+    parser.add_argument('--seed',        type=int,   default=3,
+                        help='Random seed for reproducibility')
     parser.add_argument('--num-workers', type=int,   default=4)
     args = parser.parse_args()
     main(args)

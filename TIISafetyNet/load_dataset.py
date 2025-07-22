@@ -5,6 +5,8 @@ import cv2
 import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
+from torchvision import transforms
+
 
 class GaussianBlur:
     def __init__(self, ksize=(33, 33)):
@@ -16,7 +18,7 @@ class GaussianBlur:
 
         img_np = np.array(img)
         img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-        blurred = cv2.GaussianBlur(img_np, self.ksize, 0)
+        blurred = cv2.GaussianBlur(img_np, self.ksize, 1)
         blurred = cv2.cvtColor(blurred, cv2.COLOR_BGR2RGB)
         return Image.fromarray(blurred)
 
@@ -27,11 +29,11 @@ class TIIDataset(Dataset):
     Assumes each JSON file has a 'label' key with 0 or 1, and corresponding image with same basename + .jpeg.
     """
 
-    def __init__(self, root_dir: str, transform=None, collapse: str = 'both'):
+    def __init__(self, root_dir: str, transform=None, target_size=(224, 224)):
         self.transform = transform
-        self.collapse = collapse
         self.samples = []
         self.blur = GaussianBlur()
+        self.resize = transforms.Resize(target_size, interpolation=Image.BILINEAR)
 
         # Iterate subjects
         for subj in os.listdir(root_dir):
@@ -79,7 +81,10 @@ class TIIDataset(Dataset):
     def __getitem__(self, idx):
         img_path, label = self.samples[idx]
         image = Image.open(img_path).convert('RGB')
+        image = self.resize(image)
+
         image = self.blur(image)
         if self.transform:
             image = self.transform(image)
+
         return {'pixel_values': image, 'labels': label}

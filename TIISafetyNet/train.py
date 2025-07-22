@@ -1,4 +1,5 @@
 import argparse
+import random
 from collections import Counter
 
 import numpy as np
@@ -6,15 +7,9 @@ import torch
 from evaluate import load
 from torch.utils.data import random_split
 from transformers import ViTForImageClassification, TrainingArguments, Trainer, ViTImageProcessor
+from torchvision.transforms import functional as F
 
 from TIISafetyNet.load_dataset import TIIDataset
-
-
-def collate_fn(batch):
-    return {
-        'pixel_values': torch.stack([x['pixel_values'] for x in batch]),
-        'labels': torch.tensor([x['labels'] for x in batch])
-    }
 
 
 def compute_metrics(eval_pred):
@@ -34,6 +29,26 @@ def main(args):
     train_len = int(total * args.train_split)
     val_len = int(total * args.val_split)
     test_len = total - train_len - val_len
+
+    label_counts = Counter(lbl for _, lbl in dataset.samples)
+    print(f"Total samples: {total}")
+    print(f"Class distribution -> 0: {label_counts[0]}, 1: {label_counts[1]}")
+
+    # Determine minority label for augmentation
+    minority_label = 0 if label_counts[0] < label_counts[1] else 1
+    print(f"Minority class: {minority_label}")
+
+    def collate_fn(batch):
+        images, labels = [], []
+        for x in batch:
+            img = x['pixel_values']
+            lbl = x['labels']
+            # apply horizontal flip with 50% probability for minority
+            if lbl == minority_label and random.random() < 0.5:
+                img = F.hflip(img)
+            images.append(img)
+            labels.append(lbl)
+        return {'pixel_values': torch.stack(images), 'labels': torch.tensor(labels)}
 
     train_ds, val_ds, test_ds = random_split(
         dataset, [train_len, val_len, test_len],
@@ -60,6 +75,7 @@ def main(args):
         output_dir=args.output_dir,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
+        dataloader_num_workers=args.num_workers,
         num_train_epochs=args.epochs,
         eval_strategy='steps',
         eval_steps=args.eval_steps,
@@ -105,7 +121,7 @@ if __name__ == '__main__':
     parser.add_argument('--val-split', type=float, default=0.15)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--lr', type=float, default=2e-4)
-    parser.add_argument('--epochs', type=int, default=4)
+    parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--logging-steps', type=int, default=10)
     parser.add_argument('--eval-steps', type=int, default=100)
     parser.add_argument('--save-steps', type=int, default=100)

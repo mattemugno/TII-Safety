@@ -41,7 +41,7 @@ for subject in SUBJECTS:
                     continue
 
                 h, w = img.shape[:2]
-                entry = [0, 0]  # [left, right]
+                entry = [1, 1]  # [left, right]
 
                 if fname in kp_dict:
                     kp_info = kp_dict[fname]['keypoints']
