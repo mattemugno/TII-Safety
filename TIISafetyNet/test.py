@@ -1,16 +1,24 @@
 import argparse
+
 import torch
-from torch.utils.data import DataLoader, random_split
-from transformers import ViTForImageClassification, ViTImageProcessor
 from sklearn.metrics import classification_report
+from torch.utils.data import DataLoader
+from torchvision.transforms import (
+    CenterCrop,
+    Compose,
+    Normalize,
+    Resize,
+    ToTensor,
+)
+from transformers import ViTForImageClassification, ViTImageProcessor
 
 from TIISafetyNet.load_dataset import TIIDataset
 
-def collate_fn(batch):
-    return {
-        'pixel_values': torch.stack([x['pixel_values'] for x in batch]),
-        'labels': torch.tensor([x['labels'] for x in batch])
-    }
+
+def collate_fn(examples):
+    pixel_values = torch.stack([example["pixel_values"] for example in examples])
+    labels = torch.tensor([example["label"] for example in examples])
+    return {"pixel_values": pixel_values, "labels": labels}
 
 def evaluate(model, test_ds, device, batch_size=32, num_workers=4):
     model.eval()
@@ -21,17 +29,17 @@ def evaluate(model, test_ds, device, batch_size=32, num_workers=4):
         test_ds,
         batch_size=batch_size,
         num_workers=num_workers,
-        collate_fn=collate_fn,     # la tua fn che impila pixel_values e labels
+        collate_fn=collate_fn,
         pin_memory=torch.cuda.is_available()
     )
 
     with torch.no_grad():
         for batch in loader:
-            pixels = batch['pixel_values'].to(device)  # [B,C,H,W]
-            labels = batch['labels'].to(device)        # [B]
+            pixels = batch['pixel_values'].to(device)
+            labels = batch['labels'].to(device)
 
-            logits = model(pixels).logits              # [B, num_labels]
-            preds = torch.argmax(logits, dim=1)        # [B]
+            logits = model(pixels).logits
+            preds = torch.argmax(logits, dim=1)
 
             all_preds.extend(preds.cpu().tolist())
             all_labels.extend(labels.cpu().tolist())
@@ -40,26 +48,47 @@ def evaluate(model, test_ds, device, batch_size=32, num_workers=4):
 
 
 def main(args):
-    # Device
+    image_processor = ViTImageProcessor.from_pretrained(args.model_name)
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    processor = ViTImageProcessor.from_pretrained(args.model_name)
-    transform = lambda img: processor(img, return_tensors='pt')['pixel_values'].squeeze(0)
-
-    # Load dataset with transform
-    dataset = TIIDataset(args.data_root, transform=transform)
+    dataset = TIIDataset(args.data_root)
     total = len(dataset)
     train_len = int(total * args.train_split)
     val_len = int(total * args.val_split)
     test_len = total - train_len - val_len
 
-    _, _, test_ds = random_split(
-        dataset, [train_len, val_len, test_len],
-        generator=torch.Generator().manual_seed(args.seed)
+    _, _, test_ds = dataset.split(
+        train_frac=args.train_split,
+        val_frac=args.val_split,
+        seed=args.seed
     )
+
+    normalize = Normalize(mean=image_processor.image_mean, std=image_processor.image_std)
+    if "height" in image_processor.size:
+        size = (image_processor.size["height"], image_processor.size["width"])
+        crop_size = size
+        max_size = None
+    elif "shortest_edge" in image_processor.size:
+        size = image_processor.size["shortest_edge"]
+        crop_size = (size, size)
+        max_size = image_processor.size.get("longest_edge")
+
+    val_transforms = Compose(
+        [
+            Resize(size),
+            CenterCrop(crop_size),
+            ToTensor(),
+            normalize,
+        ]
+    )
+
+    test_ds.transform = val_transforms
 
     model = ViTForImageClassification.from_pretrained(
         args.model_path,
+        label2id={'unsafe':0, 'safe':1},
+        id2label={0:'unsafe', 1:'safe'},
         num_labels=2,
         ignore_mismatched_sizes=True
     )
@@ -71,11 +100,11 @@ def main(args):
     acc = sum(p == l for p, l in zip(preds, labels)) / len(labels)
     print(f"Test Accuracy: {acc:.4f}")
     print("Classification Report:")
-    class_names = ['safe', 'unsafe']
+    class_names = ['unsafe', 'safe']
     print(classification_report(labels, preds, target_names=class_names))
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Evaluate ViT model (3 classes)')
+    parser = argparse.ArgumentParser(description='Evaluate ViT model (2 classes)')
     parser.add_argument('--data-root', type=str, default='../data/dataset', help='Dataset root')
     parser.add_argument('--model-name', type=str, default='google/vit-base-patch16-224',
                         help='Pretrained ViT identifier or path')

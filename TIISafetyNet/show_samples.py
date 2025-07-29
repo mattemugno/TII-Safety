@@ -82,8 +82,8 @@ def main(args):
     images = torch.stack(images_list, dim=0)
     labels = torch.tensor(labels_list, dtype=torch.long)
 
-    #show_batch(images, labels, class_names=["Unsafe", "Safe"])
-    show_one_image(images, labels, class_names=["Unsafe", "Safe"])
+    show_batch(images, labels, class_names=["Unsafe", "Safe"])
+    #show_one_image(images, labels, class_names=["Unsafe", "Safe"])
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Visualize dataset transforms')

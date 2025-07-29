@@ -1,61 +1,88 @@
 import argparse
-import random
 from collections import Counter
 
+import evaluate
 import numpy as np
 import torch
-from evaluate import load
-from torch.utils.data import random_split
+from torchvision.transforms import (
+    CenterCrop,
+    Compose,
+    Normalize,
+    RandomHorizontalFlip,
+    RandomResizedCrop,
+    Resize,
+    ToTensor,
+)
 from transformers import ViTForImageClassification, TrainingArguments, Trainer, ViTImageProcessor
-from torchvision.transforms import functional as F
 
 from TIISafetyNet.load_dataset import TIIDataset
 
+metric = evaluate.load("accuracy")
+
 
 def compute_metrics(eval_pred):
-    logits, labels = eval_pred
-    preds = np.argmax(logits, axis=-1)
-    return load('accuracy').compute(predictions=preds, references=labels)
+    """Computes accuracy on a batch of predictions"""
+    predictions = np.argmax(eval_pred.predictions, axis=1)
+    return metric.compute(predictions=predictions, references=eval_pred.label_ids)
+
+
+def collate_fn(examples):
+    pixel_values = torch.stack([example["pixel_values"] for example in examples])
+    labels = torch.tensor([example["label"] for example in examples])
+    return {"pixel_values": pixel_values, "labels": labels}
 
 
 def main(args):
-    # Initialize processor
-    processor = ViTImageProcessor.from_pretrained(args.model_name)
-    transform = lambda img: processor(img, return_tensors='pt')['pixel_values'].squeeze(0)
+    image_processor = ViTImageProcessor.from_pretrained(args.model_name)
 
-    # Load dataset with transform
-    dataset = TIIDataset(args.data_root, transform=transform)
+    dataset = TIIDataset(args.data_root)
     total = len(dataset)
     train_len = int(total * args.train_split)
     val_len = int(total * args.val_split)
     test_len = total - train_len - val_len
 
-    label_counts = Counter(lbl for _, lbl in dataset.samples)
-    print(f"Total samples: {total}")
-    print(f"Class distribution -> 0: {label_counts[0]}, 1: {label_counts[1]}")
-
-    # Determine minority label for augmentation
-    minority_label = 0 if label_counts[0] < label_counts[1] else 1
-    print(f"Minority class: {minority_label}")
-
-    def collate_fn(batch):
-        images, labels = [], []
-        for x in batch:
-            img = x['pixel_values']
-            lbl = x['labels']
-            # apply horizontal flip with 50% probability for minority
-            if lbl == minority_label and random.random() < 0.5:
-                img = F.hflip(img)
-            images.append(img)
-            labels.append(lbl)
-        return {'pixel_values': torch.stack(images), 'labels': torch.tensor(labels)}
-
-    train_ds, val_ds, test_ds = random_split(
-        dataset, [train_len, val_len, test_len],
-        generator=torch.Generator().manual_seed(args.seed)
+    train_ds, val_ds, test_ds = dataset.split(
+        train_frac=args.train_split,
+        val_frac=args.val_split,
+        seed=args.seed
     )
 
-    # Print overview
+    labels = sorted({label for _, label in train_ds.samples})
+    label2id = {str(label): idx for idx, label in enumerate(labels)}
+    id2label = {idx: str(label) for idx, label in enumerate(labels)}
+
+    normalize = Normalize(mean=image_processor.image_mean, std=image_processor.image_std)
+    if "height" in image_processor.size:
+        size = (image_processor.size["height"], image_processor.size["width"])
+        crop_size = size
+        max_size = None
+    elif "shortest_edge" in image_processor.size:
+        size = image_processor.size["shortest_edge"]
+        crop_size = (size, size)
+        max_size = image_processor.size.get("longest_edge")
+
+    train_transforms = Compose(
+        [
+            RandomResizedCrop(crop_size),
+            RandomHorizontalFlip(),
+            ToTensor(),
+            normalize,
+        ]
+    )
+
+    val_transforms = Compose(
+        [
+            Resize(size),
+            CenterCrop(crop_size),
+            ToTensor(),
+            normalize,
+        ]
+    )
+
+    train_ds.transform = train_transforms
+    val_ds.transform = val_transforms
+    test_ds.transform = val_transforms
+
     labels = [lbl for _, lbl in dataset.samples]
     counter = Counter(labels)
     print(f"Total samples: {total}")
@@ -64,27 +91,30 @@ def main(args):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Load model
     model = ViTForImageClassification.from_pretrained(
-        args.model_name, num_labels=2, ignore_mismatched_sizes=True
+        args.model_name,
+        label2id=label2id,
+        id2label=id2label,
+        ignore_mismatched_sizes=True
     )
 
     model.to(device)
-    # Training arguments
+
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        per_device_train_batch_size=args.batch_size,
-        per_device_eval_batch_size=args.batch_size,
-        dataloader_num_workers=args.num_workers,
-        num_train_epochs=args.epochs,
-        eval_strategy='steps',
-        eval_steps=args.eval_steps,
-        logging_steps=args.logging_steps,
-        save_steps=args.save_steps,
-        learning_rate=args.lr,
-        fp16=torch.cuda.is_available(),
         remove_unused_columns=False,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        learning_rate=args.lr,
+        per_device_train_batch_size=args.batch_size,
+        gradient_accumulation_steps=4,
+        per_device_eval_batch_size=args.batch_size,
+        num_train_epochs=args.epochs,
+        dataloader_num_workers=args.num_workers,
+        warmup_ratio=0.1,
+        logging_steps=10,
         load_best_model_at_end=True,
+        metric_for_best_model="accuracy",
         save_total_limit=2,
     )
 
@@ -95,10 +125,9 @@ def main(args):
         eval_dataset=val_ds,
         data_collator=collate_fn,
         compute_metrics=compute_metrics,
-        tokenizer=processor,
+        tokenizer=image_processor,
     )
 
-    # Train & evaluate
     train_results = trainer.train()
     trainer.log_metrics("train", train_results.metrics)
     trainer.save_metrics("train", train_results.metrics)
@@ -120,11 +149,10 @@ if __name__ == '__main__':
     parser.add_argument('--train-split', type=float, default=0.7)
     parser.add_argument('--val-split', type=float, default=0.15)
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--lr', type=float, default=2e-4)
-    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--lr', type=float, default=5e-5)
+    parser.add_argument('--epochs', type=int, default=4)
     parser.add_argument('--logging-steps', type=int, default=10)
     parser.add_argument('--eval-steps', type=int, default=100)
     parser.add_argument('--save-steps', type=int, default=100)
     args = parser.parse_args()
     main(args)
-
