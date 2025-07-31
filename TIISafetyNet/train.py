@@ -13,7 +13,8 @@ from torchvision.transforms import (
     Resize,
     ToTensor,
 )
-from transformers import ViTForImageClassification, TrainingArguments, Trainer, ViTImageProcessor
+from transformers import TrainingArguments, Trainer, AutoImageProcessor, \
+    AutoModelForImageClassification
 
 from TIISafetyNet.load_dataset import TIIDataset
 
@@ -33,7 +34,7 @@ def collate_fn(examples):
 
 
 def main(args):
-    image_processor = ViTImageProcessor.from_pretrained(args.model_name)
+    image_processor = AutoImageProcessor.from_pretrained(args.model_name)
 
     dataset = TIIDataset(args.data_root)
     total = len(dataset)
@@ -91,7 +92,7 @@ def main(args):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    model = ViTForImageClassification.from_pretrained(
+    model = AutoModelForImageClassification.from_pretrained(
         args.model_name,
         label2id=label2id,
         id2label=id2label,
@@ -139,11 +140,17 @@ def main(args):
     trainer.save_metrics("eval", metrics)
 
 
+# models at https://huggingface.co/docs/transformers/model_doc/auto#transformers.AutoModelForImageClassification
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data-root', type=str, default='../data/dataset')
-    parser.add_argument('--model-name', type=str, default='google/vit-base-patch16-224-in21k')
-    parser.add_argument('--output-dir', type=str, default='vit-base-glove')
+    #parser.add_argument('--model-name', type=str, default='microsoft/swin-tiny-patch4-window7-224')
+    #parser.add_argument('--model-name', type=str, default='google/vit-base-patch16-224',
+    #parser.add_argument('--model-name', type=str, default='facebook/deit-tiny-patch16-224')
+    #parser.add_argument('--output-dir', type=str, default='deit-tiny-glove')
+    parser.add_argument('--model-name', type=str, default='google/vit-base-patch16-224')
+    parser.add_argument('--model-path', type=str, default='vit-base-glove')
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--num-workers', type=int, default=8)
     parser.add_argument('--train-split', type=float, default=0.7)

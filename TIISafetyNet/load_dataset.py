@@ -19,7 +19,7 @@ class GaussianBlur:
 
         img_np = np.array(img)
         img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-        blurred = cv2.GaussianBlur(img_np, self.ksize, 1)
+        blurred = cv2.GaussianBlur(img_np, self.ksize, 0)
         blurred = cv2.cvtColor(blurred, cv2.COLOR_BGR2RGB)
         return Image.fromarray(blurred)
 

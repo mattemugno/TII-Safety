@@ -52,17 +52,14 @@ def predict(image, model_path, device):
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Caricamento e blur
     original_image = Image.open(args.image).convert('RGB')
     blurred_image = apply_blur(original_image, args.kernel_size, args.sigma)
 
-    # Visualizza
     plt.imshow(blurred_image)
     plt.title(f"Blurred Input (k={args.kernel_size}, σ={args.sigma})")
     plt.axis("off")
     plt.show()
 
-    # Inferenza
     pred_class, conf = predict(blurred_image, args.model, device)
     label_map = {0: "unsafe", 1: "safe"}
     label_str = f"Class {pred_class} ({label_map[pred_class]})"
